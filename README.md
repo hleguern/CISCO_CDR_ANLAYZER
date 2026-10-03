@@ -38,11 +38,11 @@ Analyse-Tool fuer Cisco Unified Communications Manager Call Detail Records (CDR)
 
 ```bash
 # Repository klonen
-git clone https://github.com/username/cisco-cdr-analyzer.git
-cd cisco-cdr-analyzer
+git clone https://github.com/hleguern/CISCO_CDR_ANLAYZER.git cisco_cdr_analyzer
+# Befehle aus dem uebergeordneten Ordner ausfuehren (Paketname: cisco_cdr_analyzer)
 
 # Abhaengigkeiten installieren
-pip install -r requirements.txt
+pip install -r cisco_cdr_analyzer/requirements.txt
 
 # Optional: Interaktive Visualisierungen
 pip install plotly
