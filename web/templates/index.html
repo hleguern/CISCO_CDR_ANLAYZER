@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>CDR Import</title>
+<style>
+  :root {
+    --bg: #f6f7f9; --surface: #ffffff; --text: #1d2330; --muted: #5d6675;
+    --border: #dde1e7; --accent: #0b6bcb; --accent-soft: #e6f0fb;
+    --ok: #1a7f37; --warn: #9a6700; --err: #c62828;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12151a; --surface: #1b1f26; --text: #e6e9ee; --muted: #9aa3b2;
+      --border: #2d333d; --accent: #4c9be8; --accent-soft: #1d2d40;
+      --ok: #4ac26b; --warn: #d4a72c; --err: #f47067;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+         font: 15px/1.5 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 960px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 24px; margin: 0 0 4px; }
+  h2 { font-size: 16px; margin: 0 0 12px; }
+  .sub { color: var(--muted); margin: 0 0 24px; }
+  .card { background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+          padding: 20px; margin-bottom: 20px; }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+  .stat .label { color: var(--muted); font-size: 13px; }
+  .stat .value { font-size: 22px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .stat .value.small { font-size: 14px; font-weight: 500; }
+  .drop { border: 2px dashed var(--border); border-radius: 10px; padding: 32px 16px; text-align: center;
+          cursor: pointer; transition: border-color .15s, background .15s; }
+  .drop.over, .drop:hover { border-color: var(--accent); background: var(--accent-soft); }
+  .drop strong { color: var(--accent); }
+  .drop input { display: none; }
+  .files { margin: 12px 0 0; padding: 0; list-style: none; font-size: 14px; }
+  .files li { display: flex; justify-content: space-between; gap: 12px; padding: 4px 0;
+              border-bottom: 1px solid var(--border); }
+  .files li span:last-child { color: var(--muted); white-space: nowrap; }
+  .options { display: flex; flex-wrap: wrap; gap: 16px; align-items: center; margin-top: 16px; }
+  label { font-size: 14px; }
+  select, input[type=number] { font: inherit; padding: 6px 8px; border-radius: 6px;
+           border: 1px solid var(--border); background: var(--surface); color: var(--text); }
+  button { font: inherit; font-weight: 600; padding: 8px 16px; border-radius: 6px; border: 0;
+           background: var(--accent); color: #fff; cursor: pointer; }
+  button:disabled { opacity: .5; cursor: default; }
+  button.secondary { background: transparent; color: var(--accent); border: 1px solid var(--accent); }
+  .results { margin-top: 16px; font-size: 14px; }
+  .results div { padding: 6px 0; border-bottom: 1px solid var(--border); }
+  .ok { color: var(--ok); } .warn { color: var(--warn); } .err { color: var(--err); }
+  .table-wrap { overflow-x: auto; }
+  table { width: 100%; border-collapse: collapse; font-size: 14px; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); white-space: nowrap; }
+  th { color: var(--muted); font-weight: 500; }
+  td.num { text-align: right; font-variant-numeric: tabular-nums; }
+  .empty { color: var(--muted); font-size: 14px; }
+  .report-row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+  #report-status { font-size: 14px; }
+</style>
+</head>
+<body>
+<main>
+  <h1>CDR / CMR Import</h1>
+  <p class="sub">Upload Cisco CUCM CDR and CMR CSV exports. Record type, separator and encoding are detected automatically; duplicates are ignored.</p>
+
+  <section class="card">
+    <h2>Store</h2>
+    <div class="stats" id="stats">
+      <div class="stat"><div class="label">CDR records</div><div class="value" data-k="cdr_records">{{ "{:,}".format(stats.cdr_records) }}</div></div>
+      <div class="stat"><div class="label">CMR records</div><div class="value" data-k="cmr_records">{{ "{:,}".format(stats.cmr_records) }}</div></div>
+      <div class="stat"><div class="label">Imports</div><div class="value" data-k="imports">{{ stats.imports }}</div></div>
+      <div class="stat"><div class="label">First call (UTC)</div><div class="value small" data-k="first_call">{{ stats.first_call or "–" }}</div></div>
+      <div class="stat"><div class="label">Last call (UTC)</div><div class="value small" data-k="last_call">{{ stats.last_call or "–" }}</div></div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Upload files</h2>
+    <form id="upload-form">
+      <label class="drop" id="drop">
+        <input type="file" id="file-input" name="files" multiple accept=".csv,.txt,text/csv,text/plain">
+        <div><strong>Choose files</strong> or drag them here</div>
+        <div class="empty">CSV / TXT · up to {{ max_upload_mb }} MB per upload</div>
+      </label>
+      <ul class="files" id="file-list"></ul>
+      <div class="options">
+        <label>Record type
+          <select name="record_type">
+            <option value="auto">Auto-detect</option>
+            <option value="cdr">CDR</option>
+            <option value="cmr">CMR</option>
+          </select>
+        </label>
+        <label><input type="checkbox" name="force" value="true"> Re-import files already imported</label>
+        <button type="submit" id="upload-btn" disabled>Import</button>
+      </div>
+    </form>
+    <div class="results" id="results" aria-live="polite"></div>
+  </section>
+
+  <section class="card">
+    <h2>Report</h2>
+    <div class="report-row">
+      <label>Period
+        <select id="report-days">
+          <option value="">All data</option>
+          <option value="7">Last 7 days</option>
+          <option value="30">Last 30 days</option>
+          <option value="90">Last 90 days</option>
+        </select>
+      </label>
+      <button type="button" class="secondary" id="report-btn">Generate HTML report</button>
+      <span id="report-status" aria-live="polite"></span>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Import history</h2>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Imported</th><th>File</th><th>Type</th><th class="num">Read</th><th class="num">New</th><th class="num">Duplicates</th></tr></thead>
+        <tbody id="history">
+        {% for row in history %}
+          <tr><td>{{ row.imported_at }}</td><td>{{ row.file_name }}</td><td>{{ row.record_type|upper }}</td>
+              <td class="num">{{ row.rows_read }}</td><td class="num">{{ row.rows_inserted }}</td><td class="num">{{ row.rows_duplicate }}</td></tr>
+        {% else %}
+          <tr><td colspan="6" class="empty">No imports yet</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </section>
+</main>
+
+<script>
+(function () {
+  const form = document.getElementById('upload-form');
+  const input = document.getElementById('file-input');
+  const drop = document.getElementById('drop');
+  const list = document.getElementById('file-list');
+  const btn = document.getElementById('upload-btn');
+  const results = document.getElementById('results');
+  let files = [];
+
+  const fmtSize = b => b < 1024 ? b + ' B' : b < 1048576 ? (b / 1024).toFixed(1) + ' KB' : (b / 1048576).toFixed(1) + ' MB';
+  const esc = s => String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+  function setFiles(newFiles) {
+    files = Array.from(newFiles);
+    list.innerHTML = files.map(f => `<li><span>${esc(f.name)}</span><span>${fmtSize(f.size)}</span></li>`).join('');
+    btn.disabled = files.length === 0;
+  }
+
+  input.addEventListener('change', () => setFiles(input.files));
+  ['dragenter', 'dragover'].forEach(e => drop.addEventListener(e, ev => { ev.preventDefault(); drop.classList.add('over'); }));
+  ['dragleave', 'drop'].forEach(e => drop.addEventListener(e, ev => { ev.preventDefault(); drop.classList.remove('over'); }));
+  drop.addEventListener('drop', ev => setFiles(ev.dataTransfer.files));
+
+  function renderStats(stats) {
+    document.querySelectorAll('#stats [data-k]').forEach(el => {
+      const v = stats[el.dataset.k];
+      el.textContent = v == null ? '–' : (typeof v === 'number' ? v.toLocaleString('en-US') : v);
+    });
+  }
+
+  async function refreshHistory() {
+    const res = await fetch('/api/stats');
+    const data = await res.json();
+    renderStats(data.stats);
+    const tbody = document.getElementById('history');
+    tbody.innerHTML = data.history.length ? data.history.map(r =>
+      `<tr><td>${esc(r.imported_at)}</td><td>${esc(r.file_name)}</td><td>${esc(r.record_type).toUpperCase()}</td>` +
+      `<td class="num">${r.rows_read}</td><td class="num">${r.rows_inserted}</td><td class="num">${r.rows_duplicate}</td></tr>`
+    ).join('') : '<tr><td colspan="6" class="empty">No imports yet</td></tr>';
+  }
+
+  form.addEventListener('submit', async ev => {
+    ev.preventDefault();
+    if (!files.length) return;
+    const data = new FormData();
+    files.forEach(f => data.append('files', f));
+    data.append('record_type', form.record_type.value);
+    data.append('force', form.force.checked ? 'true' : 'false');
+
+    btn.disabled = true;
+    btn.textContent = 'Importing…';
+    results.innerHTML = '';
+    try {
+      const res = await fetch('/api/import', { method: 'POST', body: data });
+      const body = await res.json();
+      if (body.error) {
+        results.innerHTML = `<div class="err">${esc(body.error)}</div>`;
+      } else {
+        results.innerHTML = body.results.map(r => {
+          if (r.error) return `<div class="err">✗ ${esc(r.file)}: ${esc(r.error)}</div>`;
+          if (r.skipped) return `<div class="warn">↷ ${esc(r.file)}: already imported (tick “Re-import” to force)</div>`;
+          const warn = r.warnings.map(w => `<br><span class="warn">⚠ ${esc(w)}</span>`).join('');
+          return `<div class="ok">✓ ${esc(r.file)}: ${esc(r.record_type).toUpperCase()} – ${r.rows_read} read, ${r.rows_inserted} new, ${r.rows_duplicate} duplicates${warn}</div>`;
+        }).join('');
+        await refreshHistory();
+        input.value = '';
+        setFiles([]);
+      }
+    } catch (e) {
+      results.innerHTML = `<div class="err">Upload failed: ${esc(e.message)}</div>`;
+    } finally {
+      btn.textContent = 'Import';
+      btn.disabled = files.length === 0;
+    }
+  });
+
+  const reportBtn = document.getElementById('report-btn');
+  const reportStatus = document.getElementById('report-status');
+  reportBtn.addEventListener('click', async () => {
+    reportBtn.disabled = true;
+    reportStatus.className = '';
+    reportStatus.textContent = 'Generating…';
+    try {
+      const res = await fetch('/api/report', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ days: document.getElementById('report-days').value })
+      });
+      const body = await res.json();
+      if (body.error) {
+        reportStatus.className = 'err';
+        reportStatus.textContent = body.error;
+      } else {
+        reportStatus.className = 'ok';
+        reportStatus.innerHTML = `${body.records.toLocaleString('en-US')} calls – <a href="${esc(body.report_url)}" target="_blank" rel="noopener">open report</a>`;
+      }
+    } catch (e) {
+      reportStatus.className = 'err';
+      reportStatus.textContent = 'Report failed: ' + e.message;
+    } finally {
+      reportBtn.disabled = false;
+    }
+  });
+})();
+</script>
+</body>
+</html>

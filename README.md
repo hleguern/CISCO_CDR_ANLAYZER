@@ -13,6 +13,7 @@ Analyse-Tool fuer Cisco Unified Communications Manager Call Detail Records (CDR)
 - [Verwendung](#verwendung)
   - [Kommandozeile](#kommandozeile)
   - [CSV-Import](#csv-import)
+  - [Web-Upload](#web-upload)
   - [Python API](#python-api)
 - [Projektstruktur](#projektstruktur)
 - [Analyse-Module](#analyse-module)
@@ -93,6 +94,8 @@ python -m cisco_cdr_analyzer --cdr data/cdr.csv --security
 | `--force-import` | Bereits importierte Dateien erneut einlesen (Duplikate werden trotzdem ignoriert) |
 | `--store-days` | Bei Analyse aus dem Store nur die letzten N Tage verwenden |
 | `--store-stats` | Store-Statistik und Import-Historie anzeigen |
+| `--web` | Web-Upload-Seite starten |
+| `--host` / `--port` | Adresse und Port der Web-Seite (Standard: 127.0.0.1:8080) |
 | `--output, -o` | Ausgabeverzeichnis (Standard: output) |
 | `--report, -r` | HTML-Report generieren |
 | `--report-format` | Report-Format: html, json, xlsx |
@@ -143,6 +146,37 @@ for result in importer.import_path('exports/'):
 analyzer = CiscoCDRAnalyzer()
 analyzer.load_from_store('data/cdr_store.db', days=30)
 analyzer.merge_data()
+```
+
+### Web-Upload
+
+Eine Upload-Seite im Browser importiert CSV-Dateien per Drag & Drop in den Store,
+zeigt Store-Statistik und Import-Historie und erzeugt HTML-Reports.
+
+```bash
+# Nur lokal erreichbar: http://localhost:8080
+python -m cisco_cdr_analyzer --web
+
+# Im Netzwerk erreichbar (keine Authentifizierung - nur in vertrauenswuerdigen Netzen)
+python -m cisco_cdr_analyzer --web --host 0.0.0.0 --port 8080 --db data/cdr_store.db
+```
+
+| Endpunkt | Beschreibung |
+|----------|--------------|
+| `GET /` | Upload-Seite |
+| `POST /api/import` | Multipart-Upload, Feld `files` (mehrfach), optional `record_type` (auto/cdr/cmr), `force` |
+| `GET /api/stats` | Store-Statistik und Import-Historie (JSON) |
+| `POST /api/report` | HTML-Report aus dem Store erzeugen, optional `days` |
+
+```bash
+curl -F "files=@cdr_export.csv" -F "files=@cmr_export.csv" http://localhost:8080/api/import
+```
+
+Docker:
+
+```bash
+docker build -t cdr-analyzer .
+docker run -p 8080:8080 -v cdr-data:/data -v ./output:/output cdr-analyzer --web --host 0.0.0.0 --db /data/cdr_store.db --output /output
 ```
 
 ### Python API
@@ -222,7 +256,11 @@ cisco_cdr_analyzer/
 │   ├── csv_importer.py        # CSV-Import in SQLite-Store
 │   └── data_processor.py      # Datenverarbeitung
 ├── tests/
-│   └── test_csv_importer.py   # Tests fuer den CSV-Import
+│   ├── test_csv_importer.py   # Tests fuer den CSV-Import
+│   └── test_web.py            # Tests fuer die Web-Oberflaeche
+├── web/
+│   ├── app.py                 # Web-Upload und REST-API (Flask)
+│   └── templates/index.html   # Upload-Seite
 ├── utils/
 │   ├── helpers.py             # Hilfsfunktionen
 │   └── validators.py          # Validierungsfunktionen

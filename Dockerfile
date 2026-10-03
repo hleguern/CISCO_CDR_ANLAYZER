@@ -7,5 +7,6 @@ RUN pip install --no-cache-dir -r /app/cisco_cdr_analyzer/requirements.txt
 COPY . /app/cisco_cdr_analyzer
 
 VOLUME ["/data", "/output"]
+EXPOSE 8080
 ENTRYPOINT ["python", "-m", "cisco_cdr_analyzer"]
 CMD ["--cdr", "/app/cisco_cdr_analyzer/cdr.csv", "--cmr", "/app/cisco_cdr_analyzer/cmr.csv", "--summary", "--report", "--output", "/output"]

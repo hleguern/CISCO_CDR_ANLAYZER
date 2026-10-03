@@ -57,6 +57,9 @@ CSV import into the local store:
   %(prog)s --import "exports/cdr_*.csv" --db data/cdr_store.db --summary
   %(prog)s --db data/cdr_store.db --report --store-days 30
   %(prog)s --db data/cdr_store.db --store-stats
+
+Web upload page:
+  %(prog)s --web --port 8080
         """
     )
 
@@ -108,6 +111,27 @@ CSV import into the local store:
         '--store-stats',
         action='store_true',
         help='Print store statistics and import history'
+    )
+
+    # Web interface
+    parser.add_argument(
+        '--web',
+        action='store_true',
+        help='Start the web upload page (imports into --db, reports into --output)'
+    )
+
+    parser.add_argument(
+        '--host',
+        type=str,
+        default='127.0.0.1',
+        help='Web interface host (default: 127.0.0.1, use 0.0.0.0 to expose on the network)'
+    )
+
+    parser.add_argument(
+        '--port',
+        type=int,
+        default=8080,
+        help='Web interface port (default: 8080)'
     )
     
     parser.add_argument(
@@ -242,6 +266,16 @@ def main():
     
     db_path = args.db or DEFAULT_DB_PATH
     use_store = not args.cdr
+
+    if args.web:
+        from cisco_cdr_analyzer.web import run_server
+        run_server(
+            host=args.host,
+            port=args.port,
+            db_path=db_path,
+            reports_dir=os.path.join(args.output, 'web_reports')
+        )
+        return 0
 
     if not args.cdr and not args.import_paths and not args.db and not args.store_stats:
         print("❌ Provide --cdr <file> or --import <path> / --db <store>")
