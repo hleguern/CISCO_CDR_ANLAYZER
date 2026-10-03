@@ -24,6 +24,9 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 from cisco_cdr_analyzer import CiscoCDRAnalyzer
 from cisco_cdr_analyzer.config.settings import Settings
 from cisco_cdr_analyzer.visualization.reports import ReportGenerator
+from cisco_cdr_analyzer.core.csv_importer import CSVImporter
+
+DEFAULT_DB_PATH = os.path.join("data", "cdr_store.db")
 
 # Configure logging
 logging.basicConfig(
@@ -48,15 +51,63 @@ Examples:
   %(prog)s --cdr data/cdr.csv --report --output reports/
   %(prog)s --cdr "data/cdr_*.csv" --summary
   %(prog)s --cdr data/cdr.csv --user 1234 --days 30
+
+CSV import into the local store:
+  %(prog)s --import exports/ --import-only
+  %(prog)s --import "exports/cdr_*.csv" --db data/cdr_store.db --summary
+  %(prog)s --db data/cdr_store.db --report --store-days 30
+  %(prog)s --db data/cdr_store.db --store-stats
         """
     )
-    
+
     # Input files
     parser.add_argument(
         '--cdr', '-c',
         type=str,
-        required=True,
         help='Path to CDR file(s). Supports glob patterns (e.g., "data/cdr_*.csv")'
+    )
+
+    # CSV import / store options
+    parser.add_argument(
+        '--import', '-i',
+        dest='import_paths',
+        action='append',
+        metavar='PATH',
+        help='Import CDR/CMR CSV file, directory or glob into the store (repeatable). '
+             'Record type is detected from the header.'
+    )
+
+    parser.add_argument(
+        '--db',
+        type=str,
+        default=None,
+        help='SQLite store path (default: data/cdr_store.db). '
+             'Without --cdr, analysis runs on the store.'
+    )
+
+    parser.add_argument(
+        '--import-only',
+        action='store_true',
+        help='Only import files, skip analysis'
+    )
+
+    parser.add_argument(
+        '--force-import',
+        action='store_true',
+        help='Re-import files even if already imported (duplicates are still ignored)'
+    )
+
+    parser.add_argument(
+        '--store-days',
+        type=int,
+        default=None,
+        help='When analyzing the store, only use records from the last N days'
+    )
+
+    parser.add_argument(
+        '--store-stats',
+        action='store_true',
+        help='Print store statistics and import history'
     )
     
     parser.add_argument(
@@ -189,14 +240,68 @@ def main():
     settings.output_dir = args.output
     analyzer = CiscoCDRAnalyzer(settings)
     
+    db_path = args.db or DEFAULT_DB_PATH
+    use_store = not args.cdr
+
+    if not args.cdr and not args.import_paths and not args.db and not args.store_stats:
+        print("❌ Provide --cdr <file> or --import <path> / --db <store>")
+        return 2
+
     try:
-        # Load CDR data
-        print(f"📂 Loading CDR data from: {args.cdr}")
-        analyzer.load_cdr(args.cdr, encoding=args.encoding)
-        print(f"   ✓ Loaded {len(analyzer.cdr_df):,} CDR records\n")
-        
+        # Import CSV files into the store
+        if args.import_paths:
+            importer = CSVImporter(db_path)
+            print(f"📥 Importing into store: {db_path}")
+            failed = 0
+            for path in args.import_paths:
+                for result in importer.import_path(path, force=args.force_import):
+                    print(f"   {'✓' if result.ok else '✗'} {result}")
+                    for warning in result.warnings:
+                        print(f"     ⚠ {warning}")
+                    failed += 0 if result.ok else 1
+            print()
+            if args.import_only:
+                return 1 if failed else 0
+
+        if args.store_stats:
+            importer = CSVImporter(db_path)
+            stats = importer.stats()
+            print("🗄  STORE STATISTICS")
+            print("-" * 50)
+            for key, value in stats.items():
+                print(f"  {key:<15}: {value}")
+            history = importer.import_history(limit=10)
+            if not history.empty:
+                print("\n  Recent imports:")
+                for _, row in history.iterrows():
+                    print(f"    {row['imported_at']}  {row['record_type'].upper()}  "
+                          f"{row['file_name']}  (+{row['rows_inserted']}, "
+                          f"{row['rows_duplicate']} dup)")
+            print()
+            if use_store and not (args.summary or args.report or args.user or args.device
+                                  or args.quality or args.security or args.charts):
+                return 0
+
+        if use_store:
+            # Load CDR/CMR data from the store
+            print(f"📂 Loading data from store: {db_path}")
+            analyzer.load_from_store(db_path, days=args.store_days)
+            print(f"   ✓ Loaded {len(analyzer.cdr_df):,} CDR records")
+            if analyzer.cmr_df is not None:
+                print(f"   ✓ Loaded {len(analyzer.cmr_df):,} CMR records\n")
+                print("🔗 Merging CDR and CMR data...")
+                analyzer.merge_data()
+                print(f"   ✓ Merged {len(analyzer.merged_df):,} records\n")
+            else:
+                print()
+        else:
+            # Load CDR data
+            print(f"📂 Loading CDR data from: {args.cdr}")
+            analyzer.load_cdr(args.cdr, encoding=args.encoding)
+            print(f"   ✓ Loaded {len(analyzer.cdr_df):,} CDR records\n")
+
         # Load CMR data if provided
-        if args.cmr:
+        if args.cmr and not use_store:
             print(f"📂 Loading CMR data from: {args.cmr}")
             analyzer.load_cmr(args.cmr, encoding=args.encoding)
             print(f"   ✓ Loaded {len(analyzer.cmr_df):,} CMR records\n")
@@ -401,4 +506,4 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    sys.exit(main())

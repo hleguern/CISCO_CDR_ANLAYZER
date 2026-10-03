@@ -11,6 +11,7 @@ from datetime import datetime
 
 from ..config.settings import Settings
 from .data_loader import CDRLoader, CMRLoader
+from .csv_importer import CSVImporter
 from .data_processor import DataProcessor
 
 logger = logging.getLogger(__name__)
@@ -98,6 +99,38 @@ class CiscoCDRAnalyzer:
         logger.info(f"CMR loaded and processed: {len(self.cmr_df)} records")
         return self.cmr_df
     
+    def load_from_store(
+        self,
+        db_path: Union[str, Path] = 'data/cdr_store.db',
+        days: Optional[int] = None
+    ) -> pd.DataFrame:
+        """
+        Load and process CDR/CMR records previously imported with CSVImporter
+
+        :param db_path: Path to the SQLite store
+        :param days: Only records from the last N days (all records when None)
+        :return: Processed CDR DataFrame
+        """
+        logger.info(f"Loading CDR/CMR from store: {db_path}")
+
+        store = CSVImporter(db_path)
+        raw_cdr = store.load_cdr(days=days)
+        if raw_cdr.empty:
+            raise ValueError(f"No CDR records in store: {db_path}")
+
+        self.cdr_df = self.processor.process_cdr(raw_cdr)
+        self.cdr_file_path = str(db_path)
+        self.load_timestamp = datetime.now()
+
+        # With a date window, keep only the CMRs belonging to the selected calls
+        raw_cmr = store.load_cmr(cdr_df=raw_cdr if days is not None else None)
+        if not raw_cmr.empty:
+            self.cmr_df = self.processor.process_cmr(raw_cmr)
+            self.cmr_file_path = str(db_path)
+
+        logger.info(f"Store loaded: {len(self.cdr_df)} CDR, {len(raw_cmr)} CMR records")
+        return self.cdr_df
+
     def merge_data(self) -> Optional[pd.DataFrame]:
         """
         Merge CDR and CMR data

@@ -12,6 +12,7 @@ Analyse-Tool fuer Cisco Unified Communications Manager Call Detail Records (CDR)
 - [Installation](#installation)
 - [Verwendung](#verwendung)
   - [Kommandozeile](#kommandozeile)
+  - [CSV-Import](#csv-import)
   - [Python API](#python-api)
 - [Projektstruktur](#projektstruktur)
 - [Analyse-Module](#analyse-module)
@@ -84,8 +85,14 @@ python -m cisco_cdr_analyzer --cdr data/cdr.csv --security
 
 | Option | Beschreibung |
 |--------|--------------|
-| `--cdr, -c` | Pfad zur CDR-Datei (erforderlich) |
+| `--cdr, -c` | Pfad zur CDR-Datei (erforderlich, ausser bei Analyse aus dem Store) |
 | `--cmr, -m` | Pfad zur CMR-Datei (optional) |
+| `--import, -i` | CSV-Datei, Verzeichnis oder Glob in den Store importieren (mehrfach moeglich) |
+| `--db` | Pfad zum SQLite-Store (Standard: data/cdr_store.db) |
+| `--import-only` | Nur importieren, keine Analyse |
+| `--force-import` | Bereits importierte Dateien erneut einlesen (Duplikate werden trotzdem ignoriert) |
+| `--store-days` | Bei Analyse aus dem Store nur die letzten N Tage verwenden |
+| `--store-stats` | Store-Statistik und Import-Historie anzeigen |
 | `--output, -o` | Ausgabeverzeichnis (Standard: output) |
 | `--report, -r` | HTML-Report generieren |
 | `--report-format` | Report-Format: html, json, xlsx |
@@ -99,6 +106,44 @@ python -m cisco_cdr_analyzer --cdr data/cdr.csv --security
 | `--interactive` | Interaktive HTML-Charts generieren |
 | `--verbose, -v` | Ausfuehrliche Ausgabe |
 | `--debug` | Debug-Modus |
+
+### CSV-Import
+
+CDR/CMR-Exporte aus dem CUCM koennen in einen lokalen SQLite-Store importiert werden.
+Die Daten sammeln sich ueber mehrere Importe an und koennen danach ohne erneutes Einlesen
+der Dateien analysiert werden.
+
+- Datensatztyp (CDR oder CMR) wird anhand der Kopfzeile erkannt
+- Die CUCM-Typzeile (`INTEGER,VARCHAR(50),...`) wird automatisch uebersprungen
+- Trennzeichen (`,` `;` Tab `|`) und Kodierung (UTF-8, CP1252, Latin-1) werden erkannt
+- Duplikate werden ueber `pkid` erkannt; bereits importierte Dateien werden uebersprungen
+- Neue Spalten (unterschiedliche CUCM-Versionen) werden automatisch ergaenzt
+
+```bash
+# Ganzes Verzeichnis importieren (CDR und CMR gemischt)
+python -m cisco_cdr_analyzer --import exports/ --import-only
+
+# Mehrere Quellen importieren und direkt analysieren
+python -m cisco_cdr_analyzer --import "exports/cdr_*" --import "exports/cmr_*" --summary
+
+# Analyse aus dem Store (letzte 30 Tage)
+python -m cisco_cdr_analyzer --db data/cdr_store.db --report --store-days 30
+
+# Store-Statistik und Import-Historie
+python -m cisco_cdr_analyzer --store-stats
+```
+
+```python
+from cisco_cdr_analyzer import CiscoCDRAnalyzer, CSVImporter
+
+importer = CSVImporter('data/cdr_store.db')
+for result in importer.import_path('exports/'):
+    print(result)          # cdr_2024.csv: CDR - 1200 read, 1180 new, 20 duplicates
+
+analyzer = CiscoCDRAnalyzer()
+analyzer.load_from_store('data/cdr_store.db', days=30)
+analyzer.merge_data()
+```
 
 ### Python API
 
@@ -174,7 +219,10 @@ cisco_cdr_analyzer/
 ├── core/
 │   ├── analyzer.py            # Haupt-Analyzer-Klasse
 │   ├── data_loader.py         # Daten-Import
+│   ├── csv_importer.py        # CSV-Import in SQLite-Store
 │   └── data_processor.py      # Datenverarbeitung
+├── tests/
+│   └── test_csv_importer.py   # Tests fuer den CSV-Import
 ├── utils/
 │   ├── helpers.py             # Hilfsfunktionen
 │   └── validators.py          # Validierungsfunktionen

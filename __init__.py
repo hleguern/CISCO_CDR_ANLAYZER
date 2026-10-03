@@ -10,10 +10,13 @@ __author__ = "CDR Analyzer Team"
 from .core.analyzer import CiscoCDRAnalyzer
 from .core.data_loader import CDRLoader, CMRLoader
 from .core.data_processor import DataProcessor
+from .core.csv_importer import CSVImporter, ImportResult
 
 __all__ = [
     'CiscoCDRAnalyzer',
     'CDRLoader',
     'CMRLoader',
-    'DataProcessor'
+    'DataProcessor',
+    'CSVImporter',
+    'ImportResult'
 ]
